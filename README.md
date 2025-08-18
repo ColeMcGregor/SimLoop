@@ -37,3 +37,5 @@ Features
 
 <img width="1905" height="775" alt="image" src="https://github.com/user-attachments/assets/a4c6c303-44f4-453e-99a0-b2e33594f73e" />
 
+<img width="1913" height="666" alt="image" src="https://github.com/user-attachments/assets/a3467b2d-e8e2-4c73-8a07-07b4e7961ee4" />
+
