@@ -33,3 +33,7 @@ Features
     - Checkpoints and lap counters for each vehicle.
     - Individual lap times and summaries stored per race.
     - Direct comparison between controller strategies.
+
+
+<img width="1905" height="775" alt="image" src="https://github.com/user-attachments/assets/a4c6c303-44f4-453e-99a0-b2e33594f73e" />
+
