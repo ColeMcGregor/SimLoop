@@ -1,0 +1,235 @@
+@startuml
+title Mini Race – Class Diagram with Packages
+
+package "Core" {
+  class Game {
+    - Config config
+    - RaceManager race
+    - Track track
+    - GameLoop loop
+    + init(): void
+    + run(): void
+  }
+
+  class GameLoop {
+    - bool running
+    - float dt
+    + start(): void
+    + stop(): void
+    + tick(): void
+  }
+
+  class RaceManager {
+    - Vehicle vehicles[2]
+    - LapTimer lapTimer
+    - CheckpointSystem checkpoints
+    - ResultRecorder results
+    + setupPlayers(cfg: Config, track: Track): void
+    + update(dt: float): void
+    + isFinished(): bool
+  }
+}
+
+package "Track Generation" {
+  class TrackGenerator {
+    - TrackParams params
+    + generate(): Track
+  }
+}
+
+package "Track Representation" {
+  class Track {
+    - List<Vec2> center
+    - List<float> sPrefix
+    - List<float> halfWidth
+    - float length
+    + queryAt(pos: Vec2): TrackQuery
+    + tangentAt(s: float): Vec2
+    + normalAt(s: float): Vec2
+    + curvatureAt(s: float): float
+  }
+
+  class TrackQuery {
+    + float s
+    + float d
+    + float w
+    + bool onTrack
+    + int segIndex
+  }
+}
+
+package "Vehicles" {
+  class Vehicle {
+    - VehiclePhysics physics
+    - SensorSuite sensors
+    - IController controller
+    - Track track
+    - VehicleState state
+    + setController(c: IController): void
+    + update(dt: float): void
+    + getObservation(): Observation
+  }
+
+  class VehicleState {
+    + float s
+    + float d
+    + float speed
+    + float heading
+    + float lateralVel
+  }
+
+  class VehiclePhysics {
+    - float wheelbase
+    - float mu
+    - float drag
+    - float roll
+    - float wallDrag
+    + step(state: VehicleState, track: Track, action: Action, dt: float): void
+  }
+
+  class SensorSuite {
+    - int rayCount
+    - float rayRange
+    + sense(state: VehicleState, track: Track): Observation
+  }
+}
+
+package "Controllers" {
+  interface IController {
+    + compute(observation: Observation, dt: float): Action
+  }
+
+  class PlayerController implements IController {
+    - Input input
+  }
+
+  class BaselineController implements IController {
+    - float lookahead
+    - float kSteer
+    - float kThrottle
+  }
+
+  class MLController implements IController {
+    - ModelHandle handle
+  }
+
+  class ReplayController implements IController {
+    - List<Action> tape
+    - int index
+    + record: bool
+  }
+
+  class Observation {
+    + List<float> rays
+    + float speed
+    + float yawError
+    + float curvatureAhead
+    + bool offTrack
+  }
+
+  class Action {
+    + float steer
+    + float throttle
+    + float brake
+  }
+}
+
+package "Systems" {
+  class LapTimer {
+    - float totalTime[2]
+    - int lapCount[2]
+  }
+
+  class CheckpointSystem {
+    - List<float> checkpointS
+  }
+
+  class ResultRecorder {
+    - List<LapRecord> records
+  }
+
+  class LapRecord {
+    + int vehicleId
+    + float time
+    + int lapIndex
+  }
+}
+
+package "I/O" {
+  class Renderer {
+    + drawTrack(track: Track): void
+    + drawVehicle(vehicle: Vehicle): void
+    + drawHUD(race: RaceManager): void
+  }
+
+  class Input {
+    + read(): RawInput
+  }
+}
+
+package "Config" {
+  class Config {
+    + bool twoPlayers
+    + ControllerType controllerA
+    + ControllerType controllerB
+    + TrackParams trackParams
+    + float targetLaps
+  }
+
+  enum ControllerType {
+    Player
+    Baseline
+    ML
+    Replay
+  }
+
+  class TrackParams {
+    + float targetLength
+    + int targetTurnsMin
+    + int targetTurnsMax
+    + float probStraight
+    + float probGentle
+    + float probSharp
+    + float probHairpin
+  }
+}
+
+' === Relationships with labels ===
+Game o-- RaceManager : manages races
+Game o-- Track : holds track
+Game o-- GameLoop : runs via
+Game o-- TrackGenerator : uses to generate
+Game o-- Renderer : uses to draw
+Game --> Config : uses to configure
+
+RaceManager o-- LapTimer : keeps lap times
+RaceManager o-- CheckpointSystem : checks progress
+RaceManager o-- ResultRecorder : records results
+RaceManager o-- Vehicle : manages vehicles
+
+TrackGenerator --> Track : produces
+CheckpointSystem --> Track : queries
+Vehicle --> Track : drives along
+VehiclePhysics --> Track : applies curvature
+SensorSuite --> Track : senses against
+
+Vehicle o-- VehiclePhysics : simulates physics with
+Vehicle o-- SensorSuite : gathers data
+Vehicle o-- IController : driven by
+Vehicle --> VehicleState : maintains
+
+IController <|.. PlayerController : is a type of
+IController <|.. BaselineController : is a type of
+IController <|.. MLController : is a type of
+IController <|.. ReplayController : is a type of
+PlayerController --> Input : reads from
+IController --> Observation : uses as input
+IController --> Action : produces as output
+Vehicle --> Observation : provides to controller
+
+ResultRecorder o-- LapRecord : stores
+CheckpointSystem --> Track : uses track data
+
+Config --> TrackParams : includes generation params
+
+@enduml

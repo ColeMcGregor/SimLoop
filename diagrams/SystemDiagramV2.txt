@@ -1,0 +1,324 @@
+@startuml
+title Mini Race – Class Diagram with Packages
+
+package "Core" {
+  class Game {
+    - Config config
+    - RaceManager race
+    - Track track
+    - GameLoop loop
+    + init(): void
+    + run(): void
+  }
+
+  class GameLoop {
+    - bool running
+    - float dt
+    + start(): void
+    + stop(): void
+    + tick(): void
+  }
+
+  class RaceManager {
+    - Vehicle vehicles[2]
+    - LapTimer lapTimer
+    - CheckpointSystem checkpoints
+    - ResultRecorder results
+    + setupPlayers(cfg: Config, track: Track): void
+    + update(dt: float): void
+    + isFinished(): bool
+  }
+}
+
+package "Track Generation" {
+  class TrackGenerator {
+    - TrackParams params
+    + generate(): Track
+  }
+}
+
+package "Track Representation" {
+
+  ' === Core Track ===
+  class Track {
+    - List<TrackPoint>  points              ' dense points along the track centerline (uniform spacing in meters)
+    - List<float>       alongPrefix         ' cumulative along-track distance for fast lookup (meters)
+    - float             totalLength         ' total track length (meters)
+    - SpatialIndex      spatialIndex        ' 2D grid: world cell -> indices into points
+    - List<SurfaceBand> surfaceBands        ' bands defining curb/grass/wall etc. over (along, lateral)
+    - OptimalLine       optimalLine         ' optional racing line (desired lateral offset vs along)
+
+    + buildFromControlPoints(ctrl: List<Vec2>): void
+    + length(): float
+
+    ' --- Queries (vehicle/world interactions) ---
+    + project(worldPos: Vec2, alongHint: float): TrackQuery
+    + queryAt(worldPos: Vec2): TrackQuery     ' convenience alias
+
+    + centerPos(along: float): Vec2           ' center point at along-track distance
+    + tangentAt(along: float): Vec2           ' forward direction (unit)
+    + normalAt(along: float): Vec2            ' left/right direction (unit)
+    + curvatureAt(along: float): float        ' bend amount (1/m)
+
+    + leftBoundary(along: float): float       ' max lateral offset to the left (meters, >= 0)
+    + rightBoundary(along: float): float      ' max lateral offset to the right (meters, >= 0)
+    + worldFromAlongLateral(along: float, lateral: float): Vec2 ' centerPos + lateral * normal
+    + insideTrack(along: float, lateral: float): bool
+    + distanceToEdge(along: float, lateral: float): float       ' positive distance to nearest edge (meters)
+
+    + frictionAt(along: float, lateral: float): float           ' coefficient of friction at (along,lateral)
+    + surfaceAt(along: float, lateral: float): Surface          ' surface type at (along,lateral)
+    + desiredLateralOnOptimal(along: float): float              ' target lateral offset for baseline AI
+  }
+
+  ' === Sampled point along the centerline ===
+  class TrackPoint {
+    + Vec2  pos            ' world position of the centerline
+    + Vec2  tangent        ' unit forward vector
+    + Vec2  normal         ' unit left/right vector (choose left as +)
+    + float curvature      ' bend (1/m); + means turning toward +normal
+    + float along          ' cumulative distance from start (meters)
+    + float leftMax        ' left boundary from center (meters)
+    + float rightMax       ' right boundary from center (meters)
+    + float bank           ' banking angle in radians (optional)
+    + float elevation      ' height z (optional/future)
+  }
+
+  ' === Result of projecting a world position onto the track ===
+  class TrackQuery {
+    + float along                   ' along-track distance (meters)
+    + float lateral                 ' signed lateral offset from center (+ toward normal), meters
+    + float leftMax                 ' boundary to the left at this along (meters)
+    + float rightMax                ' boundary to the right at this along (meters)
+    + bool  isOnTrack               ' inside boundaries?
+    + int   nearestPointIndex       ' index into points[] for debugging/visualization
+    + float distanceToEdge          ' meters to the nearest boundary (>0 inside, <0 beyond edge)
+    + Surface surface               ' surface type at this (along,lateral)
+    + float friction                ' mu at this (along,lateral)
+  }
+
+  ' === Lateral bands describing surfaces (curb, grass, wall, etc.) ===
+  class SurfaceBand {
+    + float alongStart
+    + float alongEnd
+    + float lateralMin              ' inclusive (meters, negative is right if +normal is left)
+    + float lateralMax              ' inclusive
+    + Surface type
+    + float friction                ' coefficient of friction for physics
+  }
+
+  enum Surface {
+    Asphalt
+    Curb
+    Rumble
+    Grass
+    Gravel
+    Wall
+  }
+
+  ' === Optional racing/optimal line ===
+  class OptimalLine {
+    - List<LinePoint> samples        ' sampled on the same along-grid
+    + lateralAt(along: float): float ' desired lateral offset at this along (meters)
+  }
+
+  class LinePoint {
+    + float along
+    + float lateral
+  }
+
+  ' === Spatial accelerator for fast projection lookups ===
+  class SpatialIndex {
+    - Vec2  origin                   ' world-space min corner
+    - Vec2  cellSize                 ' world meters per cell
+    - int   cols
+    - int   rows
+    - Map<int, List<int>> cellToPointIdx  ' key = r*cols + c
+    + queryAABB(min: Vec2, max: Vec2): List<int>
+  }
+}
+
+package "Vehicles" {
+  class Vehicle {
+    - VehiclePhysics physics
+    - SensorSuite sensors
+    - IController controller
+    - Track track
+    - VehicleState state
+    + setController(c: IController): void
+    + update(dt: float): void
+    + getObservation(): Observation
+  }
+
+  class VehicleState {
+    + float s
+    + float d
+    + float speed
+    + float heading
+    + float lateralVel
+  }
+
+  class VehiclePhysics {
+    - float wheelbase
+    - float mu
+    - float drag
+    - float roll
+    - float wallDrag
+    + step(state: VehicleState, track: Track, action: Action, dt: float): void
+  }
+
+  class SensorSuite {
+    - int rayCount
+    - float rayRange
+    + sense(state: VehicleState, track: Track): Observation
+  }
+}
+
+package "Controllers" {
+  interface IController {
+    + compute(observation: Observation, dt: float): Action
+  }
+
+  class PlayerController implements IController {
+    - Input input
+  }
+
+  class BaselineController implements IController {
+    - float lookahead
+    - float kSteer
+    - float kThrottle
+  }
+
+  class MLController implements IController {
+    - ModelHandle handle
+  }
+
+  class ReplayController implements IController {
+    - List<Action> tape
+    - int index
+    + record: bool
+  }
+
+  class Observation {
+    + List<float> rays
+    + float speed
+    + float yawError
+    + float curvatureAhead
+    + bool offTrack
+  }
+
+  class Action {
+    + float steer
+    + float throttle
+    + float brake
+  }
+}
+
+package "Systems" {
+  class LapTimer {
+    - float totalTime[2]
+    - int lapCount[2]
+  }
+
+  class CheckpointSystem {
+    - List<float> checkpointS
+  }
+
+  class ResultRecorder {
+    - List<LapRecord> records
+  }
+
+  class LapRecord {
+    + int vehicleId
+    + float time
+    + int lapIndex
+  }
+}
+
+package "I/O" {
+  class Renderer {
+    + drawTrack(track: Track): void
+    + drawVehicle(vehicle: Vehicle): void
+    + drawHUD(race: RaceManager): void
+  }
+
+  class Input {
+    + read(): RawInput
+  }
+}
+
+package "Config" {
+  class Config {
+    + bool twoPlayers
+    + ControllerType controllerA
+    + ControllerType controllerB
+    + TrackParams trackParams
+    + float targetLaps
+  }
+
+  enum ControllerType {
+    Player
+    Baseline
+    ML
+    Replay
+  }
+
+  class TrackParams {
+    + float targetLength
+    + int targetTurnsMin
+    + int targetTurnsMax
+    + float probStraight
+    + float probGentle
+    + float probSharp
+    + float probHairpin
+  }
+}
+
+' === Relationships with labels ===
+Game o-- RaceManager : manages races
+Game o-- Track : holds track
+Game o-- GameLoop : runs via
+Game o-- TrackGenerator : uses to generate
+Game o-- Renderer : uses to draw
+Game --> Config : uses to configure
+
+RaceManager o-- LapTimer : keeps lap times
+RaceManager o-- CheckpointSystem : checks progress
+RaceManager o-- ResultRecorder : records results
+RaceManager o-- Vehicle : manages vehicles
+
+TrackGenerator --> Track : produces
+CheckpointSystem --> Track : queries
+Vehicle --> Track : drives along
+VehiclePhysics --> Track : applies curvature
+SensorSuite --> Track : senses against
+
+Vehicle o-- VehiclePhysics : simulates physics with
+Vehicle o-- SensorSuite : gathers data
+Vehicle o-- IController : driven by
+Vehicle --> VehicleState : maintains
+
+IController <|.. PlayerController : is a type of
+IController <|.. BaselineController : is a type of
+IController <|.. MLController : is a type of
+IController <|.. ReplayController : is a type of
+PlayerController --> Input : reads from
+IController --> Observation : uses as input
+IController --> Action : produces as output
+Vehicle --> Observation : provides to controller
+
+ResultRecorder o-- LapRecord : stores
+CheckpointSystem --> Track : uses track data
+
+Config --> TrackParams : includes generation params
+
+Track o-- TrackPoint   : "centerline points (uniform spacing)"
+Track o-- SurfaceBand  : "surface definition bands"
+Track o-- OptimalLine  : "optional racing line"
+Track --> TrackQuery   : "returns on projection"
+SurfaceBand --> Surface
+OptimalLine o-- LinePoint
+Track o-- SpatialIndex : "projection accelerator"
+
+
+@enduml
